@@ -1,5 +1,10 @@
 import numpy as np
 from PIL import Image
+import zipfile
+import io
+import matplotlib.pyplot as plt
+import skimage
+from skimage.transform import resize
 
 def DepthNorm(x, maxDepth):
     return maxDepth / x
@@ -24,11 +29,24 @@ def scale_up(scale, images):
 
     return np.stack(scaled)
 
-def load_images(image_files):
+# def load_images(image_files):
+#     loaded_images = []
+#     for file in image_files:
+#         x = np.clip(np.asarray(Image.open( file ), dtype=float) / 255, 0, 1)
+#         loaded_images.append(x)
+#     return np.stack(loaded_images, axis=0)
+
+def load_zip_images(zip, file_list):
     loaded_images = []
-    for file in image_files:
-        x = np.clip(np.asarray(Image.open( file ), dtype=float) / 255, 0, 1)
-        loaded_images.append(x)
+    for file_name in file_list:
+        if ".jpg" in file_name:
+          data = zip.read(file_name)
+          dataEnc = io.BytesIO(data)
+          x = np.clip(np.asarray(Image.open( dataEnc ), dtype=float) / 255, 0, 1)
+          loaded_images.append(x)
+        else:
+          file_list.remove(file_name)
+    # print("exit load_zip_images")
     return np.stack(loaded_images, axis=0)
 
 def to_multichannel(i):
@@ -75,6 +93,39 @@ def display_images(outputs, inputs=None, gt=None, is_colormap=True, is_rescale=T
     all_images = np.stack(all_images)
     
     return skimage.util.montage(all_images, multichannel=True, fill=(0,0,0))
+
+def save_output(outputs, output_dir, file_list, dense_depth_zip, inputs=None, gt=None, is_colormap=True, is_rescale=True):
+    plasma = plt.get_cmap('plasma')
+    shape = (outputs[0].shape[0], outputs[0].shape[1], 3)
+    # print("save_output list of zip files", file_list)
+    for i in range(outputs.shape[0]):
+        file_name = "depth_" + file_list[i]
+        imgs = []
+        if isinstance(inputs, (list, tuple, np.ndarray)):
+            x = to_multichannel(inputs[i])
+            x = resize(x, shape, preserve_range=True, mode='reflect', anti_aliasing=True )
+            imgs.append(x)
+
+        if isinstance(gt, (list, tuple, np.ndarray)):
+            x = to_multichannel(gt[i])
+            x = resize(x, shape, preserve_range=True, mode='reflect', anti_aliasing=True )
+            imgs.append(x)
+        if is_colormap:
+            rescaled = outputs[i][:,:,0]
+            if is_rescale:
+                rescaled = rescaled - np.min(rescaled)
+                rescaled = rescaled / np.max(rescaled)
+            imgs.append(plasma(rescaled)[:,:,:3])
+        else:
+            imgs.append(to_multichannel(outputs[i]))
+        montage = skimage.util.montage(imgs, multichannel=True, fill=(0,0,0))
+        im = Image.fromarray(np.uint8(montage*255)).convert('L')
+        im.save("dense_depth_temp.jpg")
+        #print("saved image path == ",file_name)
+        dense_depth_zip.write('dense_depth_temp.jpg', f'{file_name}')
+        # dense_depth_zip.close()
+    # print("inside save_output exit")
+    return True
 
 def save_images(filename, outputs, inputs=None, gt=None, is_colormap=True, is_rescale=False):
     montage =  display_images(outputs, inputs, is_colormap, is_rescale)
